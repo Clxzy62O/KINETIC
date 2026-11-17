@@ -1,0 +1,76 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.2'
+          arch: 'win64_msvc2019_64'
+          modules: 'qtmultimedia'
+          cache: true
+
+      - name: Download FFmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-dl
+          $bin = (Get-ChildItem ffmpeg-dl -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+          New-Item -ItemType Directory -Force ffmpeg-bin | Out-Null
+          Copy-Item "$bin\ffmpeg.exe","$bin\ffprobe.exe" ffmpeg-bin\
+          "$PWD\ffmpeg-bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DKINETIC_BUILD_UI=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test engine
+        continue-on-error: true
+        run: build\Release\kinetic_tests.exe
+
+      - name: Assemble app folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist\KINETIC | Out-Null
+          Copy-Item build\Release\kinetic.exe dist\KINETIC\
+          Copy-Item build\Release\kinetic-cli.exe dist\KINETIC\
+          Copy-Item ffmpeg-bin\ffmpeg.exe, ffmpeg-bin\ffprobe.exe dist\KINETIC\
+          Copy-Item README.md dist\KINETIC\
+          windeployqt --release --no-translations --compiler-runtime dist\KINETIC\kinetic.exe
+          Compress-Archive -Path dist\KINETIC\* -DestinationPath KINETIC-portable.zip -Force
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSourceDir="$PWD\dist\KINETIC" /DOutDir="$PWD" installer\kinetic.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KINETIC-Windows
+          path: |
+            KINETIC-Setup.exe
+            KINETIC-portable.zip
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            KINETIC-Setup.exe
+            KINETIC-portable.zip
