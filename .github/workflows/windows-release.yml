@@ -37,7 +37,7 @@ jobs:
           "$PWD\ffmpeg-bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DKINETIC_BUILD_UI=ON
+               run: cmake -S . -B build -A x64 -DKINETIC_BUILD_UI=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel
